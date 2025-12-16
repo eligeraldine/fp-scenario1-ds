@@ -8,7 +8,7 @@ echo "✅ Semua proses redis-server dihentikan."
 
 # Menghapus file database dan log
 # Menggunakan sudo jika file mungkin dibuat oleh root (terutama di lingkungan GNS/Linux)
-sudo rm -f *.log dump*.rdb temp-*.rdb
+rm -f *.log dump*.rdb temp-*.rdb
 echo "✅ File *.log dan RDB dihapus."
 
 echo "--- Pembersihan Selesai ---"

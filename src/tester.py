@@ -2,109 +2,88 @@ import redis
 import time
 
 # ==========================================
-# --- KONFIGURASI TOPOLOGI (SESUAI REQUEST) ---
+# --- KONFIGURASI TOPOLOGI ---
 # ==========================================
 MASTER_HOST = '192.168.122.73'
 MASTER_PORT = 5000
 
-# Kita akan mengukur lag pada Replica-1
 REPLICA_HOST = '192.168.122.192'
 REPLICA_PORT = 5001
 
-# Replica-2 (Opsional, untuk memastikan cluster sehat)
-REPLICA2_HOST = '192.168.122.191'
-REPLICA2_PORT = 5002
-
-# --- KONFIGURASI BEBAN KERJA ---
-NUM_WRITES = 1000       # Sesuai instruksi Skenario 1
-VAL_SIZE = 10240        # 10KB per data (PENTING: Agar lag jaringan terasa)
+# --- KONFIGURASI STANDARD (RINGAN) ---
+NUM_WRITES = 1000       
+# Tidak ada VAL_SIZE besar, kita pakai string biasa
 
 def run_scenario_1():
-    print("## 🧪 Skenario 1: Observasi Replication Lag & Eventual Consistency")
+    print("## 🧪 Skenario 1: Observasi Replication Lag (Payload Ringan)")
     print(f"   Master  : {MASTER_HOST}:{MASTER_PORT}")
     print(f"   Replica : {REPLICA_HOST}:{REPLICA_PORT}")
-    print(f"   Beban   : {NUM_WRITES} keys x {VAL_SIZE/1024} KB")
+    print(f"   Jumlah  : {NUM_WRITES} keys (String Pendek)")
     print("-" * 50)
 
     try:
-        # 1. Koneksi ke Node
+        # 1. Koneksi
         master = redis.Redis(host=MASTER_HOST, port=MASTER_PORT)
         replica = redis.Redis(host=REPLICA_HOST, port=REPLICA_PORT)
         
-        # Cek Koneksi
         master.ping()
         replica.ping()
-        print("✅ Koneksi ke Master dan Replica berhasil.")
+        print("✅ Koneksi berhasil.")
 
-        # Bersihkan Database agar pengukuran akurat
+        # Bersihkan DB
         master.flushall()
-        print("🧹 Database dibersihkan (FLUSHALL).")
 
         # ==========================================
-        # 2. WRITE PHASE (Kirim 1000 Data)
+        # 2. WRITE PHASE (Payload Ringan)
         # ==========================================
-        print(f"🔄 Mengirim {NUM_WRITES} write ke Master...")
+        print(f"🔄 Mengirim {NUM_WRITES} data ke Master...")
         
-        # Siapkan data dummy 10KB
-        payload = "X" * VAL_SIZE
-        
-        # Gunakan Pipeline agar pengiriman data secepat kilat (membanjiri jaringan)
         pipeline = master.pipeline()
         for i in range(NUM_WRITES):
-            pipeline.set(f"key_{i}", payload)
+            # Payload hanya string pendek biasa (misal: "value_0", "value_1")
+            pipeline.set(f"key_{i}", f"value_{i}")
             
         start_write_time = time.time()
-        pipeline.execute() # Eksekusi semua perintah sekaligus
+        pipeline.execute() 
         end_write_time = time.time()
         
-        print(f"   Selesai menulis ke Master dalam {end_write_time - start_write_time:.4f} detik.")
+        print(f"   Write selesai dalam {end_write_time - start_write_time:.4f} detik.")
 
         # ==========================================
-        # 3. READ PHASE (Pengukuran Eventual Consistency)
+        # 3. READ PHASE & MEASURE
         # ==========================================
-        # Mulai stopwatch pengukuran LAG tepat setelah write selesai
         start_lag_measure = time.time()
         
-        print("🔍 Segera membaca dari Replica...")
+        print("🔍 Cek Replica...")
 
-        # Cek Instan: Apakah data SUDAH ada sekarang juga?
-        # Kita pakai dbsize() karena lebih cepat daripada cek 1000 key satu per satu
+        # Cek kondisi awal
         initial_count = replica.dbsize()
         unsynced_keys = NUM_WRITES - initial_count
 
         print("-" * 50)
-        print("### Hasil Observasi Konsistensi Eventual ###")
-        print(f"Total Key Ditulis Master : {NUM_WRITES}")
-        print(f"Total Key di Replica-1   : {initial_count}")
-        print(f"Key Belum Tersinkron     : **{unsynced_keys}**")
+        print(f"Total Key Ditulis : {NUM_WRITES}")
+        print(f"Total di Replica  : {initial_count}")
+        print(f"Key Belum Sinkron : **{unsynced_keys}**")
 
         if unsynced_keys > 0:
-            print("⚠️  EVENTUAL CONSISTENCY TERBUKTI! Ada jeda waktu sinkronisasi.")
+            print("⚠️  Eventual Consistency Terlihat.")
         else:
-            print("ℹ️  Data langsung lengkap (Jaringan sangat cepat).")
+            print("ℹ️  Data langsung lengkap (Sinkronisasi Instant).")
 
-        # ==========================================
-        # 4. MEASURE LAG (Looping Sampai Sinkron)
-        # ==========================================
-        # Loop terus menerus (Busy Wait) tanpa sleep sampai jumlah data sama
+        # Loop sampai sinkron (Busy Wait)
         while True:
-            current_count = replica.dbsize()
-            if current_count >= NUM_WRITES:
+            if replica.dbsize() >= NUM_WRITES:
                 break
-            # Tidak ada sleep disini agar akurasi tinggi
         
         end_lag_measure = time.time()
         real_lag = end_lag_measure - start_lag_measure
 
         print("-" * 50)
-        print(f"⏱️  REPLICATION LAG MURNI: {real_lag:.5f} detik")
-        print("   (Waktu murni dari Master selesai tulis sampai Replica sinkron)")
+        print(f"⏱️  REPLICATION LAG: {real_lag:.6f} detik")
         print("-" * 50)
 
-    except redis.exceptions.ConnectionError:
-        print("❌ GAGAL KONEKSI. Pastikan IP benar dan Redis berjalan.")
     except Exception as e:
-        print(f"❌ Error tidak terduga: {e}")
+        print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
     run_scenario_1()
